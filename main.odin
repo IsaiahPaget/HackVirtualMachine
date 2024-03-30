@@ -145,7 +145,7 @@ process_push_pop :: proc(line: Line, translated_lines: ^[dynamic]string) {
     } else if line.segment == "temp" || line.segment == "pointer" { 
         assert(strconv.atoi(line.index) <= 10)
         format_value := strings.concatenate({m[line.segment], line.index})
-        line_to_append := strings.concatenate({"R", format_value})
+        line_to_append := strings.concatenate({"@R", format_value})
         append(&translated_lines^, line_to_append)
 
     } else if line.segment == "local" ||
@@ -177,12 +177,12 @@ process_push_pop :: proc(line: Line, translated_lines: ^[dynamic]string) {
 
     } else {
         append(&translated_lines^, "D=A")
-        append(&translated_lines^, "R13")
+        append(&translated_lines^, "@R13")
         append(&translated_lines^, "M=D")
         append(&translated_lines^, "@SP")
         append(&translated_lines^, "AM=M-1")
         append(&translated_lines^, "D=M")
-        append(&translated_lines^, "R13")
+        append(&translated_lines^, "@R13")
         append(&translated_lines^, "A=M")
         append(&translated_lines^, "M=D")
     }
