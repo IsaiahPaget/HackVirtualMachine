@@ -5,10 +5,14 @@ import "core:os"
 import "core:strings"
 import "core:strconv"
 
+FILE_NAME ::"./vmcode.vm" 
+FILE_NAME_OUT ::"./vmcode.asm" 
+
 Line :: struct {
     command: string,
     segment: string,
-    index: string
+    index: string,
+    line_number: string,
 }
 
 Lines_State :: struct {
@@ -26,16 +30,16 @@ read_file_by_lines_in_whole :: proc(file_path: string, lines: ^Lines_State) {
     it := string(data)
     for line in strings.split_lines_iterator(&it) {
         if line != "" {
+            if line[0] == '/' {
+                continue
+            }
             append(&lines.lines, line)
         }
     }
 }
 
 parse_files :: proc(lines: ^Lines_State, parse_lines: ^[dynamic]Line) {
-    for line in lines.lines {
-        if line[0] == '/' {
-            continue
-        }
+    for line, i in lines.lines {
 
         command: string
         segment: string
@@ -57,7 +61,10 @@ parse_files :: proc(lines: ^Lines_State, parse_lines: ^[dynamic]Line) {
             index = parts[2]    
         }
 
-        new_parsed_line := Line{command, segment, index}
+        buf := make([]byte, 4, context.allocator)
+
+        line_number_str := strconv.itoa(buf,i)
+        new_parsed_line := Line{command, segment, index, line_number_str}
 
         append(&parse_lines^, new_parsed_line)
     }
@@ -121,70 +128,85 @@ syntax_error :: proc(at: string) {
     os.exit(-1)
 }
 
-process_push_pop :: proc(line: Line, translated_lines: ^[dynamic]string) {
+append_at_sym :: proc(index: string) -> string {
+    return strings.concatenate({"@", index, "\n"})
+}
 
-    m := map[string]string {
-        "local" = "@LCL",
-        "argument" = "@ARG",
-        "this" = "@THIS",
-        "that" = "@THAT",
-        "static" = "16",
-        "temp" = "5",
-        "pointer" = "3",
-    }
-    
-    if line.segment == "constant" {
-        assert(line.command != "pop")
-        line_to_append := strings.concatenate({"@", line.index})
+append_ataddr :: proc(line_number: string) -> string {
+    return strings.concatenate({"@", line_number, "\n"})
+}
+
+process_pop :: proc(line: Line, translated_lines: ^[dynamic]string, m: map[string]string) {
+    if line.segment == "local" ||
+        line.segment == "argument" ||
+        line.segment == "this" ||
+        line.segment == "that" ||
+        line.segment == "pointer" ||
+        line.segment == "temp" {
+        
+        line_to_append := strings.concatenate({
+            m[line.segment],"\n",
+            "D=M\n",
+            append_at_sym(line.index),
+            "D=D+A\n",
+            append_ataddr(line.line_number),
+            "M=D\n@SP\nM=M-1\nA=M\nD=M\n",
+            append_ataddr(line.line_number),
+            "A=M\nM=D\n",
+        })
         append(&translated_lines^, line_to_append)
-
     } else if line.segment == "static" {
-            // TODO: make static work
-            // append(&translated_lines^, line.index)
+        line_to_append := strings.concatenate({
+            "@SP\nM=M-1\nA=M\nD=M\n",
+            "@", FILE_NAME, ".", line.index, "\n",
+            "M=D\n",
+        })
+        append(&translated_lines^, line_to_append)
+    }
+}
 
-    } else if line.segment == "temp" || line.segment == "pointer" { 
-        assert(strconv.atoi(line.index) <= 10)
-        format_value := strings.concatenate({m[line.segment], line.index})
-        line_to_append := strings.concatenate({"@R", format_value})
+process_push :: proc(line: Line, translated_lines: ^[dynamic]string, m: map[string]string) {
+
+    if line.segment == "constant" {
+
+        line_to_append := strings.concatenate({
+            append_at_sym(line.index),
+            "D=A\n@SP\nA=M\nM=D\n@SP\nM=M+1\n",
+        })
         append(&translated_lines^, line_to_append)
 
     } else if line.segment == "local" ||
               line.segment == "argument" ||
               line.segment == "this" ||
               line.segment == "that" {
-        arg1 := m[line.segment]
-        arg2 := strings.concatenate({"@", line.index})
-        append(&translated_lines^, arg1)
-        append(&translated_lines^, "D=M")
-        append(&translated_lines^, arg2)
-        append(&translated_lines^, "A=D+A")
 
-    } else {
-        syntax_error(line.segment)
-    }
+        line_to_append := strings.concatenate({
+            m[line.segment], "\n",
+            "D=M\n",
+            append_at_sym(line.index),
+            "D=D+A\nA=D\nD=M\n@SP\nA=M\nM=D\n@SP\nM=M+1\n",
+        })
+        append(&translated_lines^, line_to_append)
 
-    if line.command == "push" {
-        if line.segment == "constant" {
-            append(&translated_lines^, "D=A")
-        } else {
-            append(&translated_lines^, "D=M")
-        }
-        append(&translated_lines^, "@SP")
-        append(&translated_lines^, "A=M")
-        append(&translated_lines^, "M=D")
-        append(&translated_lines^, "@SP")
-        append(&translated_lines^, "M=M+1")
+    } else if line.segment == "pointer" ||
+              line.segment == "temp" {
+        
+        line_to_append := strings.concatenate({
+            m[line.segment],"\n",
+            "D=A\n",
+            append_at_sym(line.index),
+            "D=D+A\nA=D\nD=M\n@SP\nA=M\nM=D\n@SP\nM=M+1\n",
+        })
+        append(&translated_lines^, line_to_append)
 
-    } else {
-        append(&translated_lines^, "D=A")
-        append(&translated_lines^, "@R13")
-        append(&translated_lines^, "M=D")
-        append(&translated_lines^, "@SP")
-        append(&translated_lines^, "AM=M-1")
-        append(&translated_lines^, "D=M")
-        append(&translated_lines^, "@R13")
-        append(&translated_lines^, "A=M")
-        append(&translated_lines^, "M=D")
+    } else if line.segment == "static" {
+                
+        line_to_append := strings.concatenate({
+            "@", FILE_NAME, ".", line.index, "\n",
+            append_at_sym(line.index),
+            "D=M\n@SP\nA=M\nM=D\n@SP\nM=M+1\n",
+        })
+        append(&translated_lines^, line_to_append)
     }
 }
 
@@ -192,6 +214,16 @@ process_line :: proc(line: Line, translated_lines: ^[dynamic]string) {
 
     arithmetic_commands := [?]string {"add", "sub", "eq", "lt", "and", "or", "not"}
     stack_commands := [?]string {"push", "pop"}
+
+    m := map[string]string {
+        "local" = "@LCL",
+        "argument" = "@ARG",
+        "this" = "@THIS",
+        "that" = "@THAT",
+        "static" = "@16",
+        "temp" = "@5",
+        "pointer" = "@3",
+    }
 
     assert(line.command != "")
     is_arithmetic_command := false
@@ -210,7 +242,11 @@ process_line :: proc(line: Line, translated_lines: ^[dynamic]string) {
         process_arithmetic(line, translated_lines)
     } 
     if is_stack_command {
-        process_push_pop(line, translated_lines)    
+        if line.command == "push" {
+            process_push(line, translated_lines, m)    
+        } else if line.command == "pop"{
+            process_pop(line, translated_lines, m)
+        }     
     }
     if line.segment == "" {
         return
@@ -223,14 +259,14 @@ process_line :: proc(line: Line, translated_lines: ^[dynamic]string) {
 write_to_file :: proc(translated_lines: ^[dynamic]string) {
     data_string := strings.join(translated_lines[:], "\n", context.allocator)
     bytes := transmute([]u8)data_string
-    os.write_entire_file("./out.asm", bytes)
+    os.write_entire_file(FILE_NAME_OUT, bytes)
 }
 
 main :: proc() {
     lines := lines_init()
     parse_lines := [dynamic]Line {}
     translated_lines := [dynamic]string {}
-    read_file_by_lines_in_whole("./vmcode.txt", &lines)
+    read_file_by_lines_in_whole(FILE_NAME, &lines)
     parse_files(&lines, &parse_lines)
     for line in parse_lines {
         process_line(line, &translated_lines)
