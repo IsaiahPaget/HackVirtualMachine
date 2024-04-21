@@ -63,10 +63,10 @@ parse_files :: proc(lines: ^Lines_State, parse_lines: ^[dynamic]Line) {
 
         buf := make([]byte, 4, context.allocator)
 
-        line_number_str := strconv.itoa(buf,i)
+        line_number_str := strconv.itoa(buf,i + 1)// + 1 because the line number has to start at 1 
         new_parsed_line := Line{command, segment, index, line_number_str}
 
-        append(&parse_lines^, new_parsed_line)
+        append(parse_lines, new_parsed_line)
     }
 }
 
@@ -93,17 +93,17 @@ process_arithmetic ::proc(line: Line, translated_lines: ^[dynamic]string) {
     }
 
     if line.command == "neg" || line.command == "not" {
-        append(&translated_lines^, "@SP")
-        append(&translated_lines^, "A=M-1")
+        append(translated_lines, "@SP")
+        append(translated_lines, "A=M-1")
         m_eq_m_blank_d := strings.concatenate({"M=M", m[line.command], "D"}) 
-        append(&translated_lines^, m_eq_m_blank_d)
+        append(translated_lines, m_eq_m_blank_d)
         return
     }
     
-    append(&translated_lines^, "@SP")
-    append(&translated_lines^, "AM=M-1")
-    append(&translated_lines^, "D=M")
-    append(&translated_lines^, "A=A-1")
+    append(translated_lines, "@SP")
+    append(translated_lines, "AM=M-1")
+    append(translated_lines, "D=M")
+    append(translated_lines, "A=A-1")
 
     if line.command == "add" ||
         line.command == "sub" ||
@@ -111,13 +111,13 @@ process_arithmetic ::proc(line: Line, translated_lines: ^[dynamic]string) {
         line.command == "or" {
         
         value_to_append := strings.concatenate({"M=M", m[line.command], "D"})
-        append(&translated_lines^, value_to_append)
+        append(translated_lines, value_to_append)
     } else if line.command == "eq" ||
                 line.command == "gt" ||
                 line.command == "lt" {
         // TODO: eq gr lt
-        // append(&translated_lines^, "D=M-D")
-        // append(&translated_lines^, "D=M-D")
+        // append(translated_lines, "D=M-D")
+        // append(translated_lines, "D=M-D")
     } else {
         syntax_error(line.command)
     }
@@ -133,7 +133,7 @@ append_at_sym :: proc(index: string) -> string {
 }
 
 append_ataddr :: proc(line_number: string) -> string {
-    return strings.concatenate({"@", line_number, "\n"})
+    return strings.concatenate({"@addr_", line_number, "\n"})
 }
 
 process_pop :: proc(line: Line, translated_lines: ^[dynamic]string, m: map[string]string) {
@@ -141,8 +141,7 @@ process_pop :: proc(line: Line, translated_lines: ^[dynamic]string, m: map[strin
         line.segment == "argument" ||
         line.segment == "this" ||
         line.segment == "that" ||
-        line.segment == "pointer" ||
-        line.segment == "temp" {
+        line.segment == "pointer" {
         
         line_to_append := strings.concatenate({
             m[line.segment],"\n",
@@ -154,14 +153,26 @@ process_pop :: proc(line: Line, translated_lines: ^[dynamic]string, m: map[strin
             append_ataddr(line.line_number),
             "A=M\nM=D\n",
         })
-        append(&translated_lines^, line_to_append)
+        append(translated_lines, line_to_append)}
+    if line.segment == "temp" {
+        line_to_append := strings.concatenate({
+            m[line.segment],"\n",
+            "D=A\n", // this is D=A which is the difference between temp and the others
+            append_at_sym(line.index),
+            "D=D+A\n",
+            append_ataddr(line.line_number),
+            "M=D\n@SP\nM=M-1\nA=M\nD=M\n",
+            append_ataddr(line.line_number),
+            "A=M\nM=D\n",
+        })
+        append(translated_lines, line_to_append)
     } else if line.segment == "static" {
         line_to_append := strings.concatenate({
             "@SP\nM=M-1\nA=M\nD=M\n",
             "@", FILE_NAME, ".", line.index, "\n",
             "M=D\n",
         })
-        append(&translated_lines^, line_to_append)
+        append(translated_lines, line_to_append)
     }
 }
 
@@ -173,7 +184,7 @@ process_push :: proc(line: Line, translated_lines: ^[dynamic]string, m: map[stri
             append_at_sym(line.index),
             "D=A\n@SP\nA=M\nM=D\n@SP\nM=M+1\n",
         })
-        append(&translated_lines^, line_to_append)
+        append(translated_lines, line_to_append)
 
     } else if line.segment == "local" ||
               line.segment == "argument" ||
@@ -186,7 +197,7 @@ process_push :: proc(line: Line, translated_lines: ^[dynamic]string, m: map[stri
             append_at_sym(line.index),
             "D=D+A\nA=D\nD=M\n@SP\nA=M\nM=D\n@SP\nM=M+1\n",
         })
-        append(&translated_lines^, line_to_append)
+        append(translated_lines, line_to_append)
 
     } else if line.segment == "pointer" ||
               line.segment == "temp" {
@@ -197,7 +208,7 @@ process_push :: proc(line: Line, translated_lines: ^[dynamic]string, m: map[stri
             append_at_sym(line.index),
             "D=D+A\nA=D\nD=M\n@SP\nA=M\nM=D\n@SP\nM=M+1\n",
         })
-        append(&translated_lines^, line_to_append)
+        append(translated_lines, line_to_append)
 
     } else if line.segment == "static" {
                 
@@ -206,7 +217,7 @@ process_push :: proc(line: Line, translated_lines: ^[dynamic]string, m: map[stri
             append_at_sym(line.index),
             "D=M\n@SP\nA=M\nM=D\n@SP\nM=M+1\n",
         })
-        append(&translated_lines^, line_to_append)
+        append(translated_lines, line_to_append)
     }
 }
 
